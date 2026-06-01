@@ -343,4 +343,4 @@ def wavelet_shifted_filter():
 
 
 if __name__ == "__main__":
-    sound_filter()
+    wavelet_shifted_filter()

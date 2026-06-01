@@ -431,9 +431,154 @@ def calculate_signal_metrics():
     plt.close()
 
 
+def calculate_metrics(original, filtered):
+    mse = mean_squared_error(original, filtered)
+    mae = mean_absolute_error(original, filtered)
+    rmse = np.sqrt(mse)
+    r2 = r2_score(original, filtered)
+    variance = np.var(original - filtered)
+    return {
+        "MSE": mse,
+        "MAE": mae,
+        "RMSE": rmse,
+        "R2": r2,
+        "D": variance,
+    }
+
+
+def plot_snr_metric(metric_name, snr_values, wt_mean, wt_list, g_mean, g_list):
+    snr_scatter_wt = []
+    metric_scatter_wt = []
+    snr_scatter_g = []
+    metric_scatter_g = []
+
+    for snr, metric_list in zip(snr_values, wt_list):
+        snr_scatter_wt.extend([snr] * len(metric_list))
+        metric_scatter_wt.extend(metric_list)
+
+    for snr, metric_list in zip(snr_values, g_list):
+        snr_scatter_g.extend([snr] * len(metric_list))
+        metric_scatter_g.extend(metric_list)
+
+    fig, axes = plt.subplots(1, 2, figsize=(12, 5))
+
+    axes[0].scatter(
+        snr_scatter_wt,
+        metric_scatter_wt,
+        color="red",
+        alpha=0.05,
+        label=f"Окремі значення {metric_name} WT",
+    )
+    axes[0].plot(snr_values, wt_mean, linewidth=2, label=f"Середнє {metric_name} WT")
+    axes[0].scatter(
+        snr_scatter_g,
+        metric_scatter_g,
+        color="green",
+        alpha=0.05,
+        label=f"Окремі значення {metric_name} GF",
+    )
+    axes[0].plot(snr_values, g_mean, linewidth=2, label=f"Середнє {metric_name} GF")
+    axes[0].set_xticks(np.arange(-10, 21, 2))
+    axes[0].set_xlabel("SNR (дБ)")
+    axes[0].set_ylabel(metric_name)
+    axes[0].grid(True)
+    axes[0].legend()
+    axes[0].set_title("Лінійний масштаб")
+
+    axes[1].scatter(
+        snr_scatter_wt,
+        metric_scatter_wt,
+        color="red",
+        alpha=0.05,
+        label=f"Окремі значення {metric_name} WT",
+    )
+    axes[1].plot(snr_values, wt_mean, linewidth=2, label=f"Середнє {metric_name} WT")
+    axes[1].scatter(
+        snr_scatter_g,
+        metric_scatter_g,
+        color="green",
+        alpha=0.05,
+        label=f"Окремі значення {metric_name} GF",
+    )
+    axes[1].plot(snr_values, g_mean, linewidth=2, label=f"Середнє {metric_name} GF")
+    axes[1].set_xticks(np.arange(-10, 21, 1))
+    axes[1].set_xlabel("SNR (дБ)")
+    axes[1].set_ylabel(metric_name)
+    axes[1].grid(True)
+    if metric_name != "R2":
+        axes[1].set_yscale("log")
+    axes[1].legend()
+    axes[1].set_title("Логарифмічний масштаб")
+
+    plt.tight_layout()
+    plt.savefig(SOUNDS_DIR / f"SNR_{metric_name}.png", dpi=600)
+    plt.close(fig)
+
+
+def filtration_efficiency():
+    ensure_directories()
+
+    data, _ = sf.read(NAME_ORIGINAL_WAV)
+    data = to_mono(data)
+    signal_power = np.mean(data ** 2)
+    max_shifts = 5
+    kernel = gaussian_kernel(size=11, sigma=2)
+
+    metric_names = ["MSE", "MAE", "RMSE", "R2", "D"]
+    wt_mean = {name: [] for name in metric_names}
+    wt_list = {name: [] for name in metric_names}
+    g_mean = {name: [] for name in metric_names}
+    g_list = {name: [] for name in metric_names}
+    snr_values = []
+
+    for snr_db in np.arange(-10, 21, 0.5):
+        wt_current = {name: [] for name in metric_names}
+        g_current = {name: [] for name in metric_names}
+        noise_power = signal_power / (10 ** (snr_db / 10))
+
+        for _ in range(10):
+            noise = np.random.normal(0, np.sqrt(noise_power), size=data.shape)
+            noisy_signal = data + noise
+
+            sig_filtered_wavelet = cycle_spin(
+                noisy_signal,
+                func=wavelet_denoiser,
+                max_shifts=max_shifts,
+                shift_steps=5,
+                num_workers=1,
+            )
+            sig_filtered_gaussian = convolve(noisy_signal, kernel, mode="same")
+
+            wt_metrics = calculate_metrics(data, sig_filtered_wavelet)
+            g_metrics = calculate_metrics(data, sig_filtered_gaussian)
+
+            for name in metric_names:
+                wt_current[name].append(wt_metrics[name])
+                g_current[name].append(g_metrics[name])
+
+        for name in metric_names:
+            wt_mean[name].append(np.mean(wt_current[name]))
+            wt_list[name].append(list(wt_current[name]))
+            g_mean[name].append(np.mean(g_current[name]))
+            g_list[name].append(list(g_current[name]))
+
+        snr_values.append(snr_db)
+
+    for name in metric_names:
+        plot_snr_metric(
+            name,
+            snr_values,
+            wt_mean[name],
+            wt_list[name],
+            g_mean[name],
+            g_list[name],
+        )
+
+
 if __name__ == "__main__":
     # wavelet_shifted_filter()
     # recognizer = srec.Recognizer()
     # microphone = srec.Microphone(device_index=MICROPHONE_INDEX, sample_rate=SAMPLE_RATE)
     # sound_recoder(recognizer, microphone)
-    calculate_signal_metrics()
+    # calculate_signal_metrics()
+    filtration_efficiency()

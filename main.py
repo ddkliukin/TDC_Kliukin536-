@@ -1,3 +1,4 @@
+import glob
 from math import gcd
 from pathlib import Path
 
@@ -6,7 +7,8 @@ import numpy as np
 import pywt
 import soundfile as sf
 import speech_recognition as srec
-from scipy.signal import butter, convolve, resample_poly, sosfiltfilt
+from scipy.signal import butter, convolve, resample, resample_poly, sosfiltfilt
+from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
 from skimage.restoration import (
     cycle_spin,
     denoise_bilateral,
@@ -342,5 +344,96 @@ def wavelet_shifted_filter():
     plt.close()
 
 
+def to_scientific_pretty(x, precision=2):
+    if x == 0:
+        return "0"
+
+    superscripts = str.maketrans("0123456789-", "⁰¹²³⁴⁵⁶⁷⁸⁹⁻")
+    mantissa, exponent = f"{x:.{precision}e}".split("e")
+    mantissa = mantissa.rstrip("0").rstrip(".")
+    exponent = str(int(exponent)).translate(superscripts)
+    return f"{mantissa} * 10{exponent}"
+
+
+def get_filter_name(path):
+    path = Path(path)
+
+    if path.resolve() == NAME_RESAMPLED_WAV.resolve():
+        return "Ресемпл 4 кГц"
+
+    type_filter = path.stem.replace("Filtered_", "")
+    type_filter = type_filter.replace("_", " ")
+
+    if type_filter == "4000[Hz] 2[byte]":
+        return "Лінійний фільтр 4 кГц"
+
+    return type_filter
+
+
+def calculate_signal_metrics():
+    ensure_directories()
+
+    data_original, _ = sf.read(NAME_ORIGINAL_WAV)
+    data_original = to_mono(data_original)
+
+    headers = ["MSE", "MAE", "RMSE", "R2", "D"]
+    rows = []
+    results = []
+
+    wav_files = sorted(glob.glob(str(SOUNDS_DIR / "*.wav")))
+    for sound_path in wav_files:
+        sound_path = Path(sound_path)
+
+        if sound_path.resolve() == NAME_ORIGINAL_WAV.resolve():
+            continue
+
+        data, _ = sf.read(sound_path)
+        data = to_mono(data)
+
+        if sound_path.resolve() == NAME_RESAMPLED_WAV.resolve() or len(data) != len(data_original):
+            data = resample(data, len(data_original))
+
+        mse = mean_squared_error(data_original, data)
+        mae = mean_absolute_error(data_original, data)
+        rmse = np.sqrt(mse)
+        r2 = r2_score(data_original, data)
+        variance = np.var(data_original - data)
+
+        rows.append(get_filter_name(sound_path))
+        results.append(
+            [
+                to_scientific_pretty(mse),
+                to_scientific_pretty(mae),
+                to_scientific_pretty(rmse),
+                round(r2, 2),
+                to_scientific_pretty(variance),
+            ]
+        )
+
+    n_rows = len(rows)
+    n_cols = len(headers)
+    fig, ax = plt.subplots(figsize=(n_cols * 2.8, max(n_rows * 0.4, 2)))
+    ax.axis("off")
+
+    table = ax.table(
+        cellText=results,
+        rowLabels=rows,
+        colLabels=headers,
+        cellLoc="center",
+        rowLoc="center",
+        bbox=[0.08, 0, 1, 1],
+    )
+    table.auto_set_font_size(False)
+    table.set_fontsize(8)
+
+    plt.tight_layout()
+    plt.savefig(SOUNDS_DIR / "Quality_Metrics_Table.png", dpi=600, bbox_inches="tight")
+    plt.close()
+
+
 if __name__ == "__main__":
-    wavelet_shifted_filter()
+    # wavelet_shifted_filter()
+    # recognizer = srec.Recognizer()
+    # microphone = srec.Microphone(device_index=MICROPHONE_INDEX, sample_rate=SAMPLE_RATE)
+    # sound_recoder(recognizer, microphone)
+    calculate_signal_metrics()

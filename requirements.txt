@@ -6,3 +6,4 @@ pyaudio
 soundfile
 scikit-image
 PyWavelets
+scikit-learn
